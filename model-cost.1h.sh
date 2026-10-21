@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # <xbar.title>Model Cost</xbar.title>
-# <xbar.version>v0.4.1</xbar.version>
+# <xbar.version>v0.4.2</xbar.version>
 # <xbar.author>Daksh Kochhar</xbar.author>
 # <xbar.author.github>17AtGitHub</xbar.author.github>
 # <xbar.desc>Shows what each AI model costs per prompt, so you can pick before you spend.</xbar.desc>
@@ -21,7 +21,7 @@ MODE_FILE="$CONFIG_DIR/mode"
 FLOAT_MODE_FILE="$CONFIG_DIR/float-mode"
 FLOAT_PID="$CACHE_DIR/float.pid"
 FLOAT_VER_FILE="$CACHE_DIR/float.version"
-FLOAT_VERSION=2
+FLOAT_VERSION=3
 PRICES_FILE="$CACHE_DIR/prices.tsv"
 TURN_IN=100000
 TURN_OUT=10000
@@ -65,8 +65,24 @@ start_float() {
     kill "$pid" 2>/dev/null || true
     sleep 0.2
   fi
-  nohup "$0" float >/dev/null 2>&1 &
-  disown || true
+  local script="$0"
+  case "$script" in
+    /*) ;;
+    *) script="$PWD/$script" ;;
+  esac
+  # New session, so SwiftBar does not kill the panel when the menu script exits.
+  /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); fork and exit; open STDIN, "<", "/dev/null"; exec @ARGV or die $!' \
+    /bin/bash "$script" float >>"$CACHE_DIR/float.log" 2>&1 &
+  local n=0
+  while [ "$n" -lt 8 ]; do
+    n=$((n + 1))
+    pid=$(cat "$FLOAT_PID" 2>/dev/null || true)
+    ver=$(cat "$FLOAT_VER_FILE" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$ver" = "$FLOAT_VERSION" ]; then
+      return 0
+    fi
+    sleep 0.15
+  done
 }
 
 remove_model() {
@@ -413,10 +429,11 @@ EOF
       /*) plugin_path="$0" ;;
       *) plugin_path="$PWD/$0" ;;
     esac
-    MCB_PRICES="$PRICES_FILE" MCB_MODELS="$MODELS_FILE" MCB_MINE="$MINE_FILE" \
+    export MCB_PRICES="$PRICES_FILE" MCB_MODELS="$MODELS_FILE" MCB_MINE="$MINE_FILE" \
       MCB_MODE="$MODE_FILE" MCB_FLOAT="$FLOAT_MODE_FILE" MCB_PLUGIN="$plugin_path" \
-      MCB_MAX="$MAX_SHOWN" MCB_TURN_IN="$TURN_IN" MCB_TURN_OUT="$TURN_OUT" \
-      exec osascript -l JavaScript <<'EOF'
+      MCB_MAX="$MAX_SHOWN" MCB_TURN_IN="$TURN_IN" MCB_TURN_OUT="$TURN_OUT"
+    float_js="$CACHE_DIR/float.js"
+    cat >"$float_js" <<'EOF'
 ObjC.import("Cocoa");
 
 var panel;
@@ -562,24 +579,20 @@ function runTask(path, args) {
   if (!task.launchAndReturnError(err)) return;
 }
 
+var onScreen = false;
+
 function place() {
-  var mouse = $.NSEvent.mouseLocation;
-  var screens = $.NSScreen.screens;
-  var screen = $.NSScreen.mainScreen;
-  for (var i = 0; i < screens.count; i++) {
-    var candidate = screens.objectAtIndex(i);
-    var frame = candidate.frame;
-    var origin = frame.origin;
-    var size = frame.size;
-    if (mouse.x >= origin.x && mouse.x <= origin.x + size.width && mouse.y >= origin.y && mouse.y <= origin.y + size.height) {
-      screen = candidate;
-      break;
-    }
-  }
-  var visible = screen.visibleFrame;
-  var height = panel.frame.size.height;
-  var x = visible.origin.x + visible.size.width - PANEL_W - 12;
-  var y = visible.origin.y + Math.max(12, (visible.size.height - height) / 2);
+  var x = 40;
+  var y = 80;
+  try {
+    var screen = $.NSScreen.mainScreen;
+    var visible = screen.visibleFrame;
+    var height = 240;
+    try { height = panel.frame.size.height; } catch (ignored) {}
+    x = Number(visible.origin.x) + Number(visible.size.width) - PANEL_W - 12;
+    y = Number(visible.origin.y) + Math.max(12, (Number(visible.size.height) - height) / 2);
+    if (!(x >= 0) || !(y >= 0)) throw new Error("origin");
+  } catch (ignored) {}
   panel.setFrameOrigin($.NSMakePoint(x, y));
 }
 
@@ -629,23 +642,28 @@ function rebuild() {
 }
 
 function tick() {
-  if (!shouldShow() || !readText(pricesPath)) {
-    if (panel.isVisible) panel.orderOut(null);
-    return;
-  }
-  var sig = [fileMtime(pricesPath), fileMtime(modelsPath), fileMtime(minePath), fileMtime(floatPath), readLine(minePath)].join(":");
-  if (sig !== lastSig) {
-    rebuild();
-    lastSig = sig;
-    if (load().length === 0) {
-      panel.orderOut(null);
+  try {
+    var show = shouldShow() && readText(pricesPath).length > 0 && load().length > 0;
+    if (!show) {
+      if (onScreen) {
+        panel.orderOut(null);
+        onScreen = false;
+      }
       return;
     }
-    place();
-  }
-  if (!panel.isVisible) {
-    place();
-    panel.orderFrontRegardless();
+    var sig = [fileMtime(pricesPath), fileMtime(modelsPath), fileMtime(minePath), fileMtime(floatPath), readLine(minePath)].join(":");
+    if (sig !== lastSig) {
+      rebuild();
+      lastSig = sig;
+      place();
+    }
+    if (!onScreen) {
+      place();
+      panel.orderFrontRegardless();
+      onScreen = true;
+    }
+  } catch (error) {
+    onScreen = false;
   }
 }
 
@@ -698,27 +716,21 @@ function run() {
   panel.setHidesOnDeactivate(false);
   panel.setBecomesKeyOnlyIfNeeded(true);
   panel.setOpaque(false);
-  panel.setBackgroundColor($.NSColor.clearColor);
+  panel.setBackgroundColor($.NSColor.colorWithCalibratedWhiteAlpha(0.1, 0.94));
   panel.setHasShadow(true);
   panel.setAppearance($.NSAppearance.appearanceNamed($.NSAppearanceNameDarkAqua));
 
-  var effect = $.NSVisualEffectView.alloc.initWithFrame($.NSMakeRect(0, 0, PANEL_W, 80));
-  effect.setMaterial($.NSVisualEffectMaterialHUDWindow);
-  effect.setBlendingMode($.NSVisualEffectBlendingModeBehindWindow);
-  effect.setState($.NSVisualEffectStateActive);
-  effect.setWantsLayer(true);
-  effect.layer.setCornerRadius(12);
-  effect.layer.setMasksToBounds(true);
-  panel.setContentView(effect);
-
   body = $.MCBFloatBody.alloc.initWithFrame($.NSMakeRect(0, 0, PANEL_W, 80));
   body.setAutoresizingMask($.NSViewWidthSizable | $.NSViewHeightSizable);
-  effect.addSubview(body);
+  panel.setContentView(body);
 
   $.NSTimer.scheduledTimerWithTimeIntervalTargetSelectorUserInfoRepeats(0.7, floatDelegate, "tick:", null, true);
+  tick();
   app.run();
 }
 EOF
+    exec /usr/bin/osascript -l JavaScript "$float_js"
+    ;;
 esac
 
 sync_failed=0
@@ -760,10 +772,17 @@ case "$float_mode" in
   always | off) ;;
   *) float_mode=apps ;;
 esac
+panel_on=0
+if [ -f "$FLOAT_PID" ]; then
+  panel_pid=$(cat "$FLOAT_PID" 2>/dev/null || true)
+  if [ -n "$panel_pid" ] && kill -0 "$panel_pid" 2>/dev/null; then
+    panel_on=1
+  fi
+fi
 
 awk -F'\t' \
   -v self="$0" -v mine="$mine" -v max="$MAX_SHOWN" \
-  -v tin="$TURN_IN" -v tout="$TURN_OUT" -v float_mode="$float_mode" \
+  -v tin="$TURN_IN" -v tout="$TURN_OUT" -v float_mode="$float_mode" -v panel_on="$panel_on" \
   -v synced="$synced" -v gray="$GRAY" '
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
 function clip(s, w) { return length(s) > w ? substr(s, 1, w - 2) ".." : s }
@@ -833,6 +852,7 @@ END {
   print "--Cursor, Claude, Codex | " action("param1=floatmode param2=apps") (float_mode == "apps" ? " checked=true" : "")
   print "--Always | " action("param1=floatmode param2=always") (float_mode == "always" ? " checked=true" : "")
   print "--Off | " action("param1=floatmode param2=off") (float_mode == "off" ? " checked=true" : "")
+  print (panel_on ? "Panel running" : "Panel is not running") " | size=11 color=" gray
   print "---"
   print "Sync prices now | " action("param1=sync")
   print synced " | size=11 color=" gray
