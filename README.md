@@ -2,7 +2,7 @@
 
 See what each AI model costs per prompt, in your Mac menu bar, before you pick one.
 
-Cursor, Claude, and Codex hide model prices until the bill or the budget alert arrives. This puts your model and its price in the menu bar, with up to 4 models to compare one click away.
+Cursor, Claude, and Codex hide model prices until the bill or the budget alert arrives. This puts your model and its price in the menu bar, with up to 10 models to compare one click away.
 
 ```
 Opus 5.5 $0.60                       <- menu bar: your model, cost per turn
@@ -14,9 +14,7 @@ Opus 5.5 $0.60                       <- menu bar: your model, cost per turn
   Grok 4.7         █░░░░░░░      $0.26
 ──────────────────────────────────
 Show as            ›  $ per turn / Times the cheapest / $ per 1M tokens
-Add a model        ›
-Remove a model     ›
-Edit list...
+Edit models…
 ──────────────────────────────────
 Sync prices now
 Prices synced 2h ago
@@ -36,8 +34,8 @@ The script installs [SwiftBar](https://swiftbar.app) with Homebrew if you don't 
 
 - **Click a model** to make it yours. It gets a check mark and shows in the menu bar.
 - **Show as** switches between dollars per turn, times the cheapest model shown, and raw $ per 1M input/output tokens.
-- **Add a model** and **Remove a model** pick from the supported list. Up to 4 are shown, most expensive first.
-- **Edit list...** opens `~/.config/model-cost/models`. Add a model that isn't in the list (an internal or fine-tuned one) as a line like `My Model | 3 | 15`, meaning $3 per 1M input tokens and $15 per 1M output tokens.
+- **Edit models…** opens a small window that stays open. Minus removes a model, plus adds one, and the menu bar updates behind it. Up to 10 are shown, most expensive first.
+- **Custom model…** in that window opens `~/.config/model-cost/models`. Add a model that isn't in the list as a line like `My Model | 3 | 15`, meaning $3 per 1M input tokens and $15 per 1M output tokens.
 
 ## Where prices come from
 
