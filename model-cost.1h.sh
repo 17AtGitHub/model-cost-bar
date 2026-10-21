@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # <xbar.title>Model Cost</xbar.title>
-# <xbar.version>v0.4.2</xbar.version>
+# <xbar.version>v0.4.3</xbar.version>
 # <xbar.author>Daksh Kochhar</xbar.author>
 # <xbar.author.github>17AtGitHub</xbar.author.github>
 # <xbar.desc>Shows what each AI model costs per prompt, so you can pick before you spend.</xbar.desc>
@@ -21,7 +21,7 @@ MODE_FILE="$CONFIG_DIR/mode"
 FLOAT_MODE_FILE="$CONFIG_DIR/float-mode"
 FLOAT_PID="$CACHE_DIR/float.pid"
 FLOAT_VER_FILE="$CACHE_DIR/float.version"
-FLOAT_VERSION=3
+FLOAT_VERSION=4
 PRICES_FILE="$CACHE_DIR/prices.tsv"
 TURN_IN=100000
 TURN_OUT=10000
@@ -148,12 +148,12 @@ function turnCost(model) {
   return (model.inn * TURN_IN + model.out * TURN_OUT) / 1000000;
 }
 
-function track(cost, low, high) {
-  var width = 10;
-  var frac = high > low ? (cost - low) / (high - low) : 0.5;
-  var pos = Math.round(frac * (width - 1));
+function bar(cost, high) {
+  var width = 8;
+  var filled = high > 0 ? Math.round(cost / high * width) : width;
+  if (filled < 1) filled = 1;
   var line = "";
-  for (var i = 0; i < width; i++) line += i < pos ? "─" : (i === pos ? "●" : " ");
+  for (var i = 0; i < width; i++) line += i < filled ? "█" : "░";
   return line;
 }
 
@@ -270,8 +270,8 @@ function rebuild() {
   }
   data.shown.forEach(function (model, index) {
     label(model.name, 16, y, 108, 13, null, false);
-    label(track(turnCost(model), low, high), 126, y, 84, 12, $.NSColor.secondaryLabelColor, true);
-    label(model.score > 0 ? model.score.toFixed(1) : "", 214, y, 40, 12, $.NSColor.secondaryLabelColor, true);
+    label(bar(turnCost(model), high), 126, y, 84, 12, $.NSColor.secondaryLabelColor, true);
+    label(model.score > 0 ? Math.round(model.score) + "%" : "", 214, y, 40, 12, $.NSColor.secondaryLabelColor, true);
     iconButton("minus.circle", 272, y, index);
     y += 32;
   });
@@ -293,8 +293,8 @@ function rebuild() {
   } else {
     data.available.forEach(function (model, index) {
       label(model.name, 16, y, 108, 13, null, false);
-      label(track(turnCost(model), low, high), 126, y, 84, 12, $.NSColor.secondaryLabelColor, true);
-      label(model.score > 0 ? model.score.toFixed(1) : "", 214, y, 40, 12, $.NSColor.secondaryLabelColor, true);
+      label(bar(turnCost(model), high), 126, y, 84, 12, $.NSColor.secondaryLabelColor, true);
+      label(model.score > 0 ? Math.round(model.score) + "%" : "", 214, y, 40, 12, $.NSColor.secondaryLabelColor, true);
       iconButton("plus.circle", 272, y, 1000 + index);
       y += 32;
     });
@@ -481,18 +481,18 @@ function turnCost(model) {
   return (model.inn * TURN_IN + model.out * TURN_OUT) / 1000000;
 }
 
-function track(cost, low, high) {
-  var width = 12;
-  var frac = high > low ? (cost - low) / (high - low) : 0.5;
-  var pos = Math.round(frac * (width - 1));
+function bar(cost, high) {
+  var width = 8;
+  var filled = high > 0 ? Math.round(cost / high * width) : width;
+  if (filled < 1) filled = 1;
   var line = "";
-  for (var i = 0; i < width; i++) line += i < pos ? "─" : (i === pos ? "●" : " ");
+  for (var i = 0; i < width; i++) line += i < filled ? "█" : "░";
   return line;
 }
 
 function scoreText(model) {
   if (!(model.score > 0)) return "    ";
-  var text = model.score.toFixed(1);
+  var text = Math.round(model.score) + "%";
   while (text.length < 4) text = " " + text;
   return text;
 }
@@ -614,7 +614,7 @@ function rebuild() {
   var font = $.NSFont.fontWithNameSize("Menlo", 11);
   if (!font) font = $.NSFont.monospacedSystemFontOfSizeWeight(11, $.NSFontWeightRegular);
   var y = 6;
-  var header = $.NSTextField.labelWithString(fit("", 16) + " " + fit("cost →", 12) + " coding");
+  var header = $.NSTextField.labelWithString("longer bar costs more    % = tasks finished");
   header.setFrame($.NSMakeRect(8, y, PANEL_W - 16, 16));
   header.setFont(font);
   header.setTextColor($.NSColor.secondaryLabelColor);
@@ -622,7 +622,7 @@ function rebuild() {
   y += 18;
   shown.forEach(function (model, index) {
     var button = $.NSButton.alloc.initWithFrame($.NSMakeRect(8, y, PANEL_W - 16, 22));
-    var title = fit(model.name, 16) + " " + track(turnCost(model), low, high) + " " + scoreText(model);
+    var title = fit(model.name, 16) + " " + bar(turnCost(model), high) + " " + scoreText(model);
     button.setTitle(title);
     button.setFont(font);
     button.setBordered(false);
@@ -786,14 +786,14 @@ awk -F'\t' \
   -v synced="$synced" -v gray="$GRAY" '
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
 function clip(s, w) { return length(s) > w ? substr(s, 1, w - 2) ".." : s }
-function track(c, width,   frac, pos, s, j) {
-  frac = (top == cheapest) ? 0.5 : (c - cheapest) / (top - cheapest)
-  pos = int(frac * (width - 1) + 0.5)
+function bar(c,   w, s, j) {
+  w = top > 0 ? int(c / top * 8 + 0.5) : 8
+  if (w < 1) w = 1
   s = ""
-  for (j = 0; j < width; j++) s = s (j < pos ? "─" : (j == pos ? "●" : " "))
+  for (j = 1; j <= 8; j++) s = s (j <= w ? "█" : "░")
   return s
 }
-function scoretext(k) { return scores[k] == "" ? "    " : sprintf("%4.1f", scores[k]) }
+function scoretext(k) { return scores[k] == "" ? "    " : sprintf("%3.0f%%", scores[k]) }
 function swap(a, b,   t) {
   t = ids[a]; ids[a] = ids[b]; ids[b] = t
   t = names[a]; names[a] = names[b]; names[b] = t
@@ -836,11 +836,11 @@ END {
   } else {
     m = 1; for (k = 1; k <= n; k++) if (ids[k] == mine) m = k
     top = costs[1]; cheapest = costs[n]
-    print names[m] "  " track(costs[m], 7)
+    print names[m] "  " bar(costs[m])
     print "---"
-    printf "%-16s %-12s %s | size=11 color=%s\n", "", "cost →", "coding", gray
+    print "longer = costs more. % = coding tasks finished | size=11 color=" gray
     for (k = 1; k <= n; k++) {
-      printf "%-16s %s %s | font=Menlo size=12 %s%s\n", clip(names[k], 16), track(costs[k], 12), scoretext(k),
+      printf "%-16s %s %s | font=Menlo size=12 %s%s\n", clip(names[k], 16), bar(costs[k]), scoretext(k),
         action("param1=mine param2=\"" ids[k] "\""), (k == m ? " checked=true" : "")
     }
   }

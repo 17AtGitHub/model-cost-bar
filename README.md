@@ -5,13 +5,13 @@ See what each AI model costs per prompt, in your Mac menu bar, before you pick o
 Cursor, Claude, and Codex hide model prices until the bill or the budget alert arrives. This puts your model and its price in the menu bar, with up to 10 models to compare one click away.
 
 ```
-Opus  ───●                         <- menu bar: your model, where it sits on cost
+Fable 5.1  ████████
 ──────────────────────────────────
-                   cost →     coding
-  Fable 5.1        ───────────●  62.2
-✓ Opus 5.5         ──────●        66.0
-  GPT-5.6 Terra    ───●
-  Grok 4.7         ──●            56.3
+  longer = costs more. % = coding tasks finished
+  Fable 5.1        ████████  62%
+✓ Opus 5.5         ███░░░░░  66%
+  GPT-5.6 Terra    ██░░░░░░
+  Grok 4.7         █░░░░░░░  56%
 ──────────────────────────────────
 Edit models…
 ```
@@ -30,7 +30,7 @@ The script installs [SwiftBar](https://swiftbar.app) with Homebrew if you don't 
 
 - **Panel** sits on the right of the screen while Cursor, Claude, or Codex is in front, including full screen. Claude Code and Codex in Terminal, iTerm, Warp, or Ghostty count too. Click a row to pick your model. Switch it under **Panel** to Always or Off.
 - **Click a model** in the menu to make it yours. It gets a check mark and shows in the menu bar.
-- The line is cost. Left is cheaper, right is more expensive, and the gap between dots is the difference. The number is a coding score, higher is better. GPT-5.6 Terra has no published score, so that cell is empty.
+- A longer bar costs more. The percent is how often that model, in its usual coding tool, finished the tasks in the Artificial Analysis Coding Agent Index. Higher is better. GPT-5.6 Terra has no published score, so that cell is empty.
 - **Edit models…** opens a small window that stays open. Minus removes a model, plus adds one, and the menu bar updates behind it. Up to 10 are shown, most expensive first.
 - **Custom model…** in that window opens `~/.config/model-cost/models`. Add a model that isn't in the list as a line like `My Model | 3 | 15`, meaning $3 per 1M input tokens and $15 per 1M output tokens.
 
