@@ -1,12 +1,12 @@
-id	name
-claude-fable-5-1	Fable 5.1
-claude-opus-5-5	Opus 5.5
-claude-sonnet-5-5	Sonnet 5.5
-claude-haiku-5-5	Haiku 5.5
-gpt-5.6-sol	GPT-5.6 Sol
-gpt-5.6-terra	GPT-5.6 Terra
-gpt-5.6-luna	GPT-5.6 Luna
-xai/grok-4.7	Grok 4.7
-gemini/gemini-3.8-flash	Gemini 3.8 Flash
-moonshot/kimi-k3	Kimi K3
-deepseek/deepseek-v4-pro	DeepSeek V4 Pro
+id	name	score
+claude-fable-5-1	Fable 5.1	62.2
+claude-opus-5-5	Opus 5.5	66.0
+claude-sonnet-5-5	Sonnet 5.5	68.4
+claude-haiku-5-5	Haiku 5.5	36.5
+gpt-5.6-sol	GPT-5.6 Sol	54.6
+gpt-5.6-terra	GPT-5.6 Terra	
+gpt-5.6-luna	GPT-5.6 Luna	43.2
+xai/grok-4.7	Grok 4.7	56.3
+gemini/gemini-3.8-flash	Gemini 3.8 Flash	41.9
+moonshot/kimi-k3	Kimi K3	51.9
+deepseek/deepseek-v4-pro	DeepSeek V4 Pro	43.1

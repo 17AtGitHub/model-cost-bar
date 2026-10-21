@@ -28,7 +28,13 @@ def main() -> None:
         if cost_in is None or cost_out is None:
             missing.append(model["id"])
             continue
-        rows.append([model["id"], model["name"], per_million(cost_in), per_million(cost_out)])
+        rows.append([
+            model["id"],
+            model["name"],
+            per_million(cost_in),
+            per_million(cost_out),
+            (model.get("score") or "").strip(),
+        ])
 
     if missing:
         print(f"warning: not in LiteLLM price list: {', '.join(missing)}", file=sys.stderr)
@@ -37,7 +43,7 @@ def main() -> None:
 
     with open(ROOT / "prices.tsv", "w", newline="") as f:
         writer = csv.writer(f, delimiter="\t", lineterminator="\n")
-        writer.writerow(["id", "name", "input_per_m", "output_per_m"])
+        writer.writerow(["id", "name", "input_per_m", "output_per_m", "score"])
         writer.writerows(rows)
     print(f"wrote {len(rows)} models to prices.tsv")
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # <xbar.title>Model Cost</xbar.title>
-# <xbar.version>v0.3.0</xbar.version>
+# <xbar.version>v0.4.0</xbar.version>
 # <xbar.author>Daksh Kochhar</xbar.author>
 # <xbar.author.github>17AtGitHub</xbar.author.github>
 # <xbar.desc>Shows what each AI model costs per prompt, so you can pick before you spend.</xbar.desc>
@@ -21,7 +21,7 @@ MODE_FILE="$CONFIG_DIR/mode"
 FLOAT_MODE_FILE="$CONFIG_DIR/float-mode"
 FLOAT_PID="$CACHE_DIR/float.pid"
 FLOAT_VER_FILE="$CACHE_DIR/float.version"
-FLOAT_VERSION=1
+FLOAT_VERSION=2
 PRICES_FILE="$CACHE_DIR/prices.tsv"
 TURN_IN=100000
 TURN_OUT=10000
@@ -131,9 +131,13 @@ function turnCost(model) {
   return (model.inn * TURN_IN + model.out * TURN_OUT) / 1000000;
 }
 
-function money(cost) {
-  if (cost < 0.01) return "<$0.01";
-  return "$" + (Math.round(cost * 100) / 100).toFixed(2);
+function track(cost, low, high) {
+  var width = 10;
+  var frac = high > low ? (cost - low) / (high - low) : 0.5;
+  var pos = Math.round(frac * (width - 1));
+  var line = "";
+  for (var i = 0; i < width; i++) line += i < pos ? "─" : (i === pos ? "●" : " ");
+  return line;
 }
 
 function readText(path) {
@@ -148,7 +152,10 @@ function load() {
     if (!line) return;
     var parts = line.split("\t");
     if (parts.length < 4 || !parts[0] || !parts[1]) return;
-    var model = { id: parts[0], name: parts[1], inn: Number(parts[2]), out: Number(parts[3]) };
+    var model = {
+      id: parts[0], name: parts[1], inn: Number(parts[2]), out: Number(parts[3]),
+      score: parts[4] ? Number(parts[4]) : 0
+    };
     byId[model.id] = model;
     catalog.push(model);
   });
@@ -231,6 +238,13 @@ function rebuild() {
   var data = load();
   shownIds = data.shown.map(function (model) { return model.id; });
   addIds = data.available.map(function (model) { return model.id; });
+  var low = null;
+  var high = null;
+  data.shown.concat(data.available).forEach(function (model) {
+    var cost = turnCost(model);
+    if (low === null || cost < low) low = cost;
+    if (high === null || cost > high) high = cost;
+  });
   var y = 14;
 
   if (data.shown.length === 0) {
@@ -238,8 +252,9 @@ function rebuild() {
     y += 32;
   }
   data.shown.forEach(function (model, index) {
-    label(model.name, 16, y, 176, 13, null, false);
-    label(money(turnCost(model)), 196, y, 64, 12, $.NSColor.secondaryLabelColor, true);
+    label(model.name, 16, y, 108, 13, null, false);
+    label(track(turnCost(model), low, high), 126, y, 84, 12, $.NSColor.secondaryLabelColor, true);
+    label(model.score > 0 ? model.score.toFixed(1) : "", 214, y, 40, 12, $.NSColor.secondaryLabelColor, true);
     iconButton("minus.circle", 272, y, index);
     y += 32;
   });
@@ -260,8 +275,9 @@ function rebuild() {
     y += 32;
   } else {
     data.available.forEach(function (model, index) {
-      label(model.name, 16, y, 176, 13, null, false);
-      label(money(turnCost(model)), 196, y, 64, 12, $.NSColor.secondaryLabelColor, true);
+      label(model.name, 16, y, 108, 13, null, false);
+      label(track(turnCost(model), low, high), 126, y, 84, 12, $.NSColor.secondaryLabelColor, true);
+      label(model.score > 0 ? model.score.toFixed(1) : "", 214, y, 40, 12, $.NSColor.secondaryLabelColor, true);
       iconButton("plus.circle", 272, y, 1000 + index);
       y += 32;
     });
@@ -407,7 +423,7 @@ var pluginPath = env("MCB_PLUGIN");
 var MAX = Number(env("MCB_MAX")) || 10;
 var TURN_IN = Number(env("MCB_TURN_IN")) || 100000;
 var TURN_OUT = Number(env("MCB_TURN_OUT")) || 10000;
-var PANEL_W = 268;
+var PANEL_W = 300;
 
 function readText(path) {
   var text = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null);
@@ -432,14 +448,20 @@ function turnCost(model) {
   return (model.inn * TURN_IN + model.out * TURN_OUT) / 1000000;
 }
 
-function money(cost) {
-  if (cost < 0.01) return "<$0.01";
-  return "$" + (Math.round(cost * 100) / 100).toFixed(2);
+function track(cost, low, high) {
+  var width = 12;
+  var frac = high > low ? (cost - low) / (high - low) : 0.5;
+  var pos = Math.round(frac * (width - 1));
+  var line = "";
+  for (var i = 0; i < width; i++) line += i < pos ? "─" : (i === pos ? "●" : " ");
+  return line;
 }
 
-function trimNum(n) {
-  if (n === Math.round(n)) return String(Math.round(n));
-  return String(Math.round(n * 100) / 100);
+function scoreText(model) {
+  if (!(model.score > 0)) return "    ";
+  var text = model.score.toFixed(1);
+  while (text.length < 4) text = " " + text;
+  return text;
 }
 
 function load() {
@@ -448,7 +470,10 @@ function load() {
     if (!line) return;
     var parts = line.split("\t");
     if (parts.length < 4 || !parts[0] || !parts[1]) return;
-    byId[parts[0]] = { id: parts[0], name: parts[1], inn: Number(parts[2]), out: Number(parts[3]) };
+    byId[parts[0]] = {
+      id: parts[0], name: parts[1], inn: Number(parts[2]), out: Number(parts[3]),
+      score: parts[4] ? Number(parts[4]) : 0
+    };
   });
   var shown = [];
   var seen = {};
@@ -477,29 +502,9 @@ function load() {
   return shown;
 }
 
-function displayMode() {
-  var mode = readLine(modePath);
-  return mode === "x" || mode === "perm" ? mode : "turn";
-}
-
 function floatMode() {
   var mode = readLine(floatPath);
   return mode === "always" || mode === "off" ? mode : "apps";
-}
-
-function valueText(model, mode, cheapest) {
-  var cost = turnCost(model);
-  if (mode === "x") return (cost / cheapest).toFixed(1) + "x";
-  if (mode === "perm") return "$" + trimNum(model.inn) + "/" + trimNum(model.out);
-  return money(cost);
-}
-
-function blocks(frac) {
-  var width = Math.round(frac * 5);
-  if (width < 1) width = 1;
-  var bar = "";
-  for (var i = 0; i < 5; i++) bar += i < width ? "█" : "░";
-  return bar;
 }
 
 function fit(text, width) {
@@ -574,16 +579,21 @@ function rebuild() {
     panel.setContentSize($.NSMakeSize(PANEL_W, 36));
     return;
   }
-  var mode = displayMode();
   var mine = readLine(minePath);
-  var cheapest = turnCost(shown[shown.length - 1]);
-  var top = turnCost(shown[0]);
+  var low = turnCost(shown[shown.length - 1]);
+  var high = turnCost(shown[0]);
   var font = $.NSFont.fontWithNameSize("Menlo", 11);
   if (!font) font = $.NSFont.monospacedSystemFontOfSizeWeight(11, $.NSFontWeightRegular);
-  var y = 8;
+  var y = 6;
+  var header = $.NSTextField.labelWithString(fit("", 16) + " " + fit("cost →", 12) + " coding");
+  header.setFrame($.NSMakeRect(8, y, PANEL_W - 16, 16));
+  header.setFont(font);
+  header.setTextColor($.NSColor.secondaryLabelColor);
+  body.addSubview(header);
+  y += 18;
   shown.forEach(function (model, index) {
     var button = $.NSButton.alloc.initWithFrame($.NSMakeRect(8, y, PANEL_W - 16, 22));
-    var title = fit(model.name, 14) + " " + blocks(turnCost(model) / top) + " " + valueText(model, mode, cheapest);
+    var title = fit(model.name, 16) + " " + track(turnCost(model), low, high) + " " + scoreText(model);
     button.setTitle(title);
     button.setFont(font);
     button.setBordered(false);
@@ -607,7 +617,7 @@ function tick() {
     if (panel.isVisible) panel.orderOut(null);
     return;
   }
-  var sig = [fileMtime(pricesPath), fileMtime(modelsPath), fileMtime(minePath), fileMtime(modePath), fileMtime(floatPath), readLine(minePath), displayMode()].join(":");
+  var sig = [fileMtime(pricesPath), fileMtime(modelsPath), fileMtime(minePath), fileMtime(floatPath), readLine(minePath)].join(":");
   if (sig !== lastSig) {
     rebuild();
     lastSig = sig;
@@ -697,7 +707,7 @@ esac
 
 sync_failed=0
 start_float
-if [ ! -s "$PRICES_FILE" ] || [ -z "$(find "$PRICES_FILE" -mmin -"$SYNC_EVERY_MIN" 2>/dev/null)" ]; then
+if [ ! -s "$PRICES_FILE" ] || [ -z "$(find "$PRICES_FILE" -mmin -"$SYNC_EVERY_MIN" 2>/dev/null)" ] || ! head -1 "$PRICES_FILE" | grep -q 'score'; then
   sync_prices || sync_failed=1
 fi
 
@@ -728,7 +738,6 @@ else
   synced="Prices synced $ago"
 fi
 
-mode=$(cat "$MODE_FILE" 2>/dev/null || true)
 mine=$(cat "$MINE_FILE" 2>/dev/null || true)
 float_mode=$(cat "$FLOAT_MODE_FILE" 2>/dev/null || true)
 case "$float_mode" in
@@ -737,34 +746,35 @@ case "$float_mode" in
 esac
 
 awk -F'\t' \
-  -v self="$0" -v mode="${mode:-turn}" -v mine="$mine" -v max="$MAX_SHOWN" \
+  -v self="$0" -v mine="$mine" -v max="$MAX_SHOWN" \
   -v tin="$TURN_IN" -v tout="$TURN_OUT" -v float_mode="$float_mode" \
   -v synced="$synced" -v gray="$GRAY" '
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-function num(v) { return v == int(v) ? sprintf("%d", v) : sprintf("%.2f", v) }
-function money(c) { return c < 0.01 ? "<$0.01" : sprintf("$%.2f", c) }
-function value(k) {
-  if (mode == "x") return sprintf("%.1fx", costs[k] / cheapest)
-  if (mode == "perm") return "$" num(ins[k]) "/" num(outs[k])
-  return money(costs[k])
-}
-function bar(c,   w, s, j) {
-  w = int(c / top * 8 + 0.5); if (w < 1) w = 1
-  s = ""; for (j = 1; j <= 8; j++) s = s (j <= w ? "█" : "░")
+function clip(s, w) { return length(s) > w ? substr(s, 1, w - 2) ".." : s }
+function track(c, width,   frac, pos, s, j) {
+  frac = (top == cheapest) ? 0.5 : (c - cheapest) / (top - cheapest)
+  pos = int(frac * (width - 1) + 0.5)
+  s = ""
+  for (j = 0; j < width; j++) s = s (j < pos ? "─" : (j == pos ? "●" : " "))
   return s
 }
-function clip(s, w) { return length(s) > w ? substr(s, 1, w - 2) ".." : s }
+function scoretext(k) { return scores[k] == "" ? "    " : sprintf("%4.1f", scores[k]) }
 function swap(a, b,   t) {
   t = ids[a]; ids[a] = ids[b]; ids[b] = t
   t = names[a]; names[a] = names[b]; names[b] = t
   t = ins[a]; ins[a] = ins[b]; ins[b] = t
   t = outs[a]; outs[a] = outs[b]; outs[b] = t
   t = costs[a]; costs[a] = costs[b]; costs[b] = t
+  t = scores[a]; scores[a] = scores[b]; scores[b] = t
 }
 function action(params) { return "bash=\"" self "\" " params " terminal=false refresh=true" }
 
 FNR == NR {
-  if (FNR > 1) { pname[$1] = $2; pin[$1] = $3 + 0; pout[$1] = $4 + 0; porder[++np] = $1 }
+  if (FNR > 1) {
+    pname[$1] = $2; pin[$1] = $3 + 0; pout[$1] = $4 + 0
+    pscore[$1] = ($5 == "" ? "" : $5 + 0)
+    porder[++np] = $1
+  }
   next
 }
 {
@@ -772,13 +782,13 @@ FNR == NR {
   if (line == "" || n >= max) next
   if (index(line, "|") > 0) {
     if (split(line, p, "|") != 3 || trim(p[1]) == "" || p[2] + 0 <= 0 || p[3] + 0 <= 0) { bad[++nbad] = line; next }
-    id = "custom:" trim(p[1]); nm = trim(p[1]); i = p[2] + 0; o = p[3] + 0
+    id = "custom:" trim(p[1]); nm = trim(p[1]); i = p[2] + 0; o = p[3] + 0; sc = ""
   } else if (line in pname) {
-    id = line; nm = pname[line]; i = pin[line]; o = pout[line]
+    id = line; nm = pname[line]; i = pin[line]; o = pout[line]; sc = pscore[line]
   } else { bad[++nbad] = line; next }
   if (id in seen) next
   seen[id] = 1
-  n++; ids[n] = id; names[n] = nm; ins[n] = i; outs[n] = o
+  n++; ids[n] = id; names[n] = nm; ins[n] = i; outs[n] = o; scores[n] = sc
   costs[n] = (i * tin + o * tout) / 1000000
 }
 END {
@@ -791,24 +801,17 @@ END {
   } else {
     m = 1; for (k = 1; k <= n; k++) if (ids[k] == mine) m = k
     top = costs[1]; cheapest = costs[n]
-    print names[m] " " value(m)
+    print names[m] "  " track(costs[m], 7)
     print "---"
-    if (mode == "x") caption = "Times the cheapest shown, per turn"
-    else if (mode == "perm") caption = "$ per 1M tokens, input/output"
-    else caption = "$ per turn: " tin / 1000 "K in + " tout / 1000 "K out"
-    print caption " | size=11 color=" gray
+    printf "%-16s %-12s %s | size=11 color=%s\n", "", "cost →", "coding", gray
     for (k = 1; k <= n; k++) {
-      printf "%-16s %s %10s | font=Menlo size=12 %s%s\n", clip(names[k], 16), bar(costs[k]), value(k),
+      printf "%-16s %s %s | font=Menlo size=12 %s%s\n", clip(names[k], 16), track(costs[k], 12), scoretext(k),
         action("param1=mine param2=\"" ids[k] "\""), (k == m ? " checked=true" : "")
     }
   }
   for (b = 1; b <= nbad; b++) { gsub(/\|/, "/", bad[b]); print "Skipped: " bad[b] " | size=11 color=" gray }
 
   print "---"
-  print "Show as"
-  print "--$ per turn | " action("param1=mode param2=turn") (mode != "x" && mode != "perm" ? " checked=true" : "")
-  print "--Times the cheapest | " action("param1=mode param2=x") (mode == "x" ? " checked=true" : "")
-  print "--$ per 1M tokens | " action("param1=mode param2=perm") (mode == "perm" ? " checked=true" : "")
   print "Edit models… | sfimage=square.and.pencil " action("param1=edit")
   print "Panel"
   print "--Cursor, Claude, Codex | " action("param1=floatmode param2=apps") (float_mode == "apps" ? " checked=true" : "")

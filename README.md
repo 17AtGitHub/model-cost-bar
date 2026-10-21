@@ -5,19 +5,15 @@ See what each AI model costs per prompt, in your Mac menu bar, before you pick o
 Cursor, Claude, and Codex hide model prices until the bill or the budget alert arrives. This puts your model and its price in the menu bar, with up to 10 models to compare one click away.
 
 ```
-Opus 5.5 $0.60                       <- menu bar: your model, cost per turn
+Opus  ───●                         <- menu bar: your model, where it sits on cost
 ──────────────────────────────────
-  $ per turn: 100K in + 10K out
-  Fable 5.1        ████████      $1.50
-✓ Opus 5.5         ███░░░░░      $0.60
-  GPT-5.6 Terra    ██░░░░░░      $0.32
-  Grok 4.7         █░░░░░░░      $0.26
+                   cost →     coding
+  Fable 5.1        ───────────●  62.2
+✓ Opus 5.5         ──────●        66.0
+  GPT-5.6 Terra    ───●
+  Grok 4.7         ──●            56.3
 ──────────────────────────────────
-Show as            ›  $ per turn / Times the cheapest / $ per 1M tokens
 Edit models…
-──────────────────────────────────
-Sync prices now
-Prices synced 2h ago
 ```
 
 ## Install
@@ -34,7 +30,7 @@ The script installs [SwiftBar](https://swiftbar.app) with Homebrew if you don't 
 
 - **Panel** sits on the right of the screen while Cursor, Claude, or Codex is in front, including full screen. Claude Code and Codex in Terminal, iTerm, Warp, or Ghostty count too. Click a row to pick your model. Switch it under **Panel** to Always or Off.
 - **Click a model** in the menu to make it yours. It gets a check mark and shows in the menu bar.
-- **Show as** switches between dollars per turn, times the cheapest model shown, and raw $ per 1M input/output tokens.
+- The line is cost. Left is cheaper, right is more expensive, and the gap between dots is the difference. The number is a coding score, higher is better. GPT-5.6 Terra has no published score, so that cell is empty.
 - **Edit models…** opens a small window that stays open. Minus removes a model, plus adds one, and the menu bar updates behind it. Up to 10 are shown, most expensive first.
 - **Custom model…** in that window opens `~/.config/model-cost/models`. Add a model that isn't in the list as a line like `My Model | 3 | 15`, meaning $3 per 1M input tokens and $15 per 1M output tokens.
 
@@ -44,7 +40,9 @@ A GitHub Action runs once a day. It reads [LiteLLM's public price list](https://
 
 Prices are the providers' list prices. What you pay through Cursor, Claude, or Codex plans can differ.
 
-**What's a "turn"?** One agent request, estimated as 100K input tokens and 10K output tokens. Real turns vary a lot, and cached input is cheaper, so use it to compare models, not to predict your bill.
+The dot uses a typical coding turn (much more input than output) only to place models. It is not a dollar forecast.
+
+The coding number is the [Artificial Analysis Coding Agent Index](https://artificialanalysis.ai/methodology/coding-agents-benchmarking), from the public table captured on 19 Oct 2026. Each score is that model in its usual coding harness, not the model alone. It is stored in [`curated.tsv`](curated.tsv) and is not refreshed by the daily price job.
 
 To add a model to the supported list, open a PR adding its LiteLLM key and a display name to `curated.tsv`.
 
