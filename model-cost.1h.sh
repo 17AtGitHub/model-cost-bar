@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # <xbar.title>Model Cost</xbar.title>
-# <xbar.version>v0.4.0</xbar.version>
+# <xbar.version>v0.4.1</xbar.version>
 # <xbar.author>Daksh Kochhar</xbar.author>
 # <xbar.author.github>17AtGitHub</xbar.author.github>
 # <xbar.desc>Shows what each AI model costs per prompt, so you can pick before you spend.</xbar.desc>
@@ -104,13 +104,14 @@ case "${1:-}" in
       /*) plugin_path="$0" ;;
       *) plugin_path="$PWD/$0" ;;
     esac
-    MCB_PRICES="$PRICES_FILE" MCB_MODELS="$MODELS_FILE" MCB_PLUGIN="$plugin_path" \
-      MCB_MAX="$MAX_SHOWN" MCB_TURN_IN="$TURN_IN" MCB_TURN_OUT="$TURN_OUT" \
-      osascript -l JavaScript <<'EOF' || true
+    edit_js="$CACHE_DIR/edit.js"
+    edit_log="$CACHE_DIR/edit.log"
+    cat >"$edit_js" <<'EOF'
 ObjC.import("Cocoa");
 
 var editorWindow;
 var clickDelegate;
+var windowDelegate;
 var shownIds = [];
 var addIds = [];
 var docView;
@@ -335,10 +336,6 @@ ObjC.registerSubclass({
       implementation: function () {
         $.NSApplication.sharedApplication.terminate(null);
       }
-    },
-    "windowDidBecomeKey:": {
-      types: ["v", ["@"]],
-      implementation: function () { rebuild(); }
     }
   }
 });
@@ -351,10 +348,21 @@ ObjC.registerSubclass({
   }
 });
 
+function fail(message) {
+  try {
+    var alert = $.NSAlert.alloc.init;
+    alert.setMessageText("Couldn't open Models");
+    alert.setInformativeText(String(message));
+    alert.runModal();
+  } catch (ignored) {}
+}
+
 function run() {
+  try {
   var app = $.NSApplication.sharedApplication;
-  app.setActivationPolicy($.NSActivationPolicyAccessory);
+  app.setActivationPolicy($.NSActivationPolicyRegular);
   clickDelegate = $.MCBClickDelegate.alloc.init;
+  windowDelegate = $.MCBWindowDelegate.alloc.init;
 
   var style = $.NSWindowStyleMaskTitled | $.NSWindowStyleMaskClosable;
   editorWindow = $.NSWindow.alloc.initWithContentRectStyleMaskBackingDefer(
@@ -365,8 +373,9 @@ function run() {
   );
   editorWindow.setTitle("Models");
   editorWindow.setLevel($.NSFloatingWindowLevel);
+  editorWindow.setHidesOnDeactivate(false);
   editorWindow.setReleasedWhenClosed(false);
-  editorWindow.setDelegate($.MCBWindowDelegate.alloc.init);
+  editorWindow.setDelegate(windowDelegate);
 
   var scroll = $.NSScrollView.alloc.initWithFrame($.NSMakeRect(0, 0, 320, 480));
   scroll.setHasVerticalScroller(true);
@@ -382,8 +391,15 @@ function run() {
   editorWindow.makeKeyAndOrderFront(app);
   app.activateIgnoringOtherApps(true);
   app.run();
+  } catch (error) {
+    fail(error);
+  }
 }
 EOF
+    MCB_PRICES="$PRICES_FILE" MCB_MODELS="$MODELS_FILE" MCB_PLUGIN="$plugin_path" \
+      MCB_MAX="$MAX_SHOWN" MCB_TURN_IN="$TURN_IN" MCB_TURN_OUT="$TURN_OUT" \
+      nohup /usr/bin/osascript -l JavaScript "$edit_js" >>"$edit_log" 2>&1 &
+    disown || true
     exit 0
     ;;
   float)
