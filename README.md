@@ -32,7 +32,8 @@ The script installs [SwiftBar](https://swiftbar.app) with Homebrew if you don't 
 
 ## Use
 
-- **Click a model** to make it yours. It gets a check mark and shows in the menu bar.
+- **Panel** sits on the right of the screen while Cursor, Claude, or Codex is in front, including full screen. Claude Code and Codex in Terminal, iTerm, Warp, or Ghostty count too. Click a row to pick your model. Switch it under **Panel** to Always or Off.
+- **Click a model** in the menu to make it yours. It gets a check mark and shows in the menu bar.
 - **Show as** switches between dollars per turn, times the cheapest model shown, and raw $ per 1M input/output tokens.
 - **Edit models…** opens a small window that stays open. Minus removes a model, plus adds one, and the menu bar updates behind it. Up to 10 are shown, most expensive first.
 - **Custom model…** in that window opens `~/.config/model-cost/models`. Add a model that isn't in the list as a line like `My Model | 3 | 15`, meaning $3 per 1M input tokens and $15 per 1M output tokens.
@@ -50,6 +51,7 @@ To add a model to the supported list, open a PR adding its LiteLLM key and a dis
 ## Uninstall
 
 ```sh
+if [ -f ~/.cache/model-cost/float.pid ]; then kill "$(cat ~/.cache/model-cost/float.pid)" 2>/dev/null || true; fi
 rm "$(defaults read com.ameba.SwiftBar PluginDirectory)/model-cost.1h.sh"
 rm -rf ~/.config/model-cost ~/.cache/model-cost
 ```

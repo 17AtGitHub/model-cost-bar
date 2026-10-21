@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # <xbar.title>Model Cost</xbar.title>
-# <xbar.version>v0.2.0</xbar.version>
+# <xbar.version>v0.3.0</xbar.version>
 # <xbar.author>Daksh Kochhar</xbar.author>
 # <xbar.author.github>17AtGitHub</xbar.author.github>
 # <xbar.desc>Shows what each AI model costs per prompt, so you can pick before you spend.</xbar.desc>
@@ -18,6 +18,10 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/model-cost"
 MODELS_FILE="$CONFIG_DIR/models"
 MINE_FILE="$CONFIG_DIR/mine"
 MODE_FILE="$CONFIG_DIR/mode"
+FLOAT_MODE_FILE="$CONFIG_DIR/float-mode"
+FLOAT_PID="$CACHE_DIR/float.pid"
+FLOAT_VER_FILE="$CACHE_DIR/float.version"
+FLOAT_VERSION=1
 PRICES_FILE="$CACHE_DIR/prices.tsv"
 TURN_IN=100000
 TURN_OUT=10000
@@ -48,6 +52,23 @@ sync_prices() {
   fi
 }
 
+start_float() {
+  [ "$(uname)" = Darwin ] || return 0
+  command -v osascript >/dev/null 2>&1 || return 0
+  local pid="" ver=""
+  [ -f "$FLOAT_PID" ] && pid=$(cat "$FLOAT_PID" 2>/dev/null || true)
+  [ -f "$FLOAT_VER_FILE" ] && ver=$(cat "$FLOAT_VER_FILE" 2>/dev/null || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$ver" = "$FLOAT_VERSION" ]; then
+    return 0
+  fi
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    sleep 0.2
+  fi
+  nohup "$0" float >/dev/null 2>&1 &
+  disown || true
+}
+
 remove_model() {
   awk -v id="$1" '
     {
@@ -62,6 +83,7 @@ remove_model() {
 case "${1:-}" in
   mine) printf '%s\n' "${2:-}" >"$MINE_FILE"; exit 0 ;;
   mode) printf '%s\n' "${2:-}" >"$MODE_FILE"; exit 0 ;;
+  floatmode) printf '%s\n' "${2:-apps}" >"$FLOAT_MODE_FILE"; exit 0 ;;
   sync) sync_prices; exit 0 ;;
   remove) remove_model "${2:-}"; exit 0 ;;
   add)
@@ -348,9 +370,333 @@ function run() {
 EOF
     exit 0
     ;;
+  float)
+    if ! command -v osascript >/dev/null 2>&1; then
+      echo "The panel runs on macOS." >&2
+      exit 1
+    fi
+    echo $$ >"$FLOAT_PID"
+    echo "$FLOAT_VERSION" >"$FLOAT_VER_FILE"
+    case "$0" in
+      /*) plugin_path="$0" ;;
+      *) plugin_path="$PWD/$0" ;;
+    esac
+    MCB_PRICES="$PRICES_FILE" MCB_MODELS="$MODELS_FILE" MCB_MINE="$MINE_FILE" \
+      MCB_MODE="$MODE_FILE" MCB_FLOAT="$FLOAT_MODE_FILE" MCB_PLUGIN="$plugin_path" \
+      MCB_MAX="$MAX_SHOWN" MCB_TURN_IN="$TURN_IN" MCB_TURN_OUT="$TURN_OUT" \
+      exec osascript -l JavaScript <<'EOF'
+ObjC.import("Cocoa");
+
+var panel;
+var body;
+var floatDelegate;
+var shownIds = [];
+var lastSig = "";
+
+function env(name) {
+  var value = $.NSProcessInfo.processInfo.environment.objectForKey(name);
+  return value ? ObjC.unwrap(value) : "";
+}
+
+var pricesPath = env("MCB_PRICES");
+var modelsPath = env("MCB_MODELS");
+var minePath = env("MCB_MINE");
+var modePath = env("MCB_MODE");
+var floatPath = env("MCB_FLOAT");
+var pluginPath = env("MCB_PLUGIN");
+var MAX = Number(env("MCB_MAX")) || 10;
+var TURN_IN = Number(env("MCB_TURN_IN")) || 100000;
+var TURN_OUT = Number(env("MCB_TURN_OUT")) || 10000;
+var PANEL_W = 268;
+
+function readText(path) {
+  var text = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null);
+  return text ? ObjC.unwrap(text) : "";
+}
+
+function readLine(path) {
+  var line = (readText(path).split("\n")[0] || "");
+  return line.replace(/^[ \t]+|[ \t]+$/g, "");
+}
+
+function fileMtime(path) {
+  var err = Ref();
+  var attrs = $.NSFileManager.defaultManager.attributesOfItemAtPathError(path, err);
+  if (!attrs) return 0;
+  var date = attrs.objectForKey("NSFileModificationDate");
+  if (!date) return 0;
+  return Number(date.timeIntervalSince1970);
+}
+
+function turnCost(model) {
+  return (model.inn * TURN_IN + model.out * TURN_OUT) / 1000000;
+}
+
+function money(cost) {
+  if (cost < 0.01) return "<$0.01";
+  return "$" + (Math.round(cost * 100) / 100).toFixed(2);
+}
+
+function trimNum(n) {
+  if (n === Math.round(n)) return String(Math.round(n));
+  return String(Math.round(n * 100) / 100);
+}
+
+function load() {
+  var byId = {};
+  readText(pricesPath).split("\n").slice(1).forEach(function (line) {
+    if (!line) return;
+    var parts = line.split("\t");
+    if (parts.length < 4 || !parts[0] || !parts[1]) return;
+    byId[parts[0]] = { id: parts[0], name: parts[1], inn: Number(parts[2]), out: Number(parts[3]) };
+  });
+  var shown = [];
+  var seen = {};
+  readText(modelsPath).split("\n").forEach(function (raw) {
+    var line = raw.replace(/#.*/, "").replace(/^[ \t]+|[ \t]+$/g, "");
+    if (!line) return;
+    var model = null;
+    if (line.indexOf("|") >= 0) {
+      var bits = line.split("|");
+      if (bits.length !== 3) return;
+      var name = bits[0].replace(/^[ \t]+|[ \t]+$/g, "");
+      var inn = Number(bits[1]);
+      var out = Number(bits[2]);
+      if (!name || !(inn > 0) || !(out > 0)) return;
+      model = { id: "custom:" + name, name: name, inn: inn, out: out };
+    } else if (byId[line]) {
+      model = byId[line];
+    } else {
+      return;
+    }
+    if (seen[model.id]) return;
+    seen[model.id] = true;
+    if (shown.length < MAX) shown.push(model);
+  });
+  shown.sort(function (a, b) { return turnCost(b) - turnCost(a); });
+  return shown;
+}
+
+function displayMode() {
+  var mode = readLine(modePath);
+  return mode === "x" || mode === "perm" ? mode : "turn";
+}
+
+function floatMode() {
+  var mode = readLine(floatPath);
+  return mode === "always" || mode === "off" ? mode : "apps";
+}
+
+function valueText(model, mode, cheapest) {
+  var cost = turnCost(model);
+  if (mode === "x") return (cost / cheapest).toFixed(1) + "x";
+  if (mode === "perm") return "$" + trimNum(model.inn) + "/" + trimNum(model.out);
+  return money(cost);
+}
+
+function blocks(frac) {
+  var width = Math.round(frac * 5);
+  if (width < 1) width = 1;
+  var bar = "";
+  for (var i = 0; i < 5; i++) bar += i < width ? "█" : "░";
+  return bar;
+}
+
+function fit(text, width) {
+  if (text.length > width) return text.substring(0, width - 1) + "…";
+  while (text.length < width) text += " ";
+  return text;
+}
+
+function frontApp() {
+  var app = $.NSWorkspace.sharedWorkspace.frontmostApplication;
+  if (!app) return "";
+  var name = app.localizedName ? ObjC.unwrap(app.localizedName) : "";
+  var bid = app.bundleIdentifier ? ObjC.unwrap(app.bundleIdentifier) : "";
+  return (name + " " + bid).toLowerCase();
+}
+
+function codingApp(label) {
+  var keys = ["cursor", "todesktop", "claude", "anthropic", "codex", "terminal", "iterm", "warp", "ghostty", "alacritty", "wezterm", "kitty"];
+  for (var i = 0; i < keys.length; i++) if (label.indexOf(keys[i]) >= 0) return true;
+  return false;
+}
+
+function shouldShow() {
+  var mode = floatMode();
+  if (mode === "off") return false;
+  if (mode === "always") return true;
+  return codingApp(frontApp());
+}
+
+function runTask(path, args) {
+  var task = $.NSTask.alloc.init;
+  task.setExecutableURL($.NSURL.fileURLWithPath(path));
+  var list = $.NSMutableArray.alloc.init;
+  args.forEach(function (arg) { list.addObject(String(arg)); });
+  task.setArguments(list);
+  task.setStandardOutput($.NSFileHandle.fileHandleWithNullDevice);
+  task.setStandardError($.NSFileHandle.fileHandleWithNullDevice);
+  var err = Ref();
+  if (!task.launchAndReturnError(err)) return;
+}
+
+function place() {
+  var mouse = $.NSEvent.mouseLocation;
+  var screens = $.NSScreen.screens;
+  var screen = $.NSScreen.mainScreen;
+  for (var i = 0; i < screens.count; i++) {
+    var candidate = screens.objectAtIndex(i);
+    var frame = candidate.frame;
+    var origin = frame.origin;
+    var size = frame.size;
+    if (mouse.x >= origin.x && mouse.x <= origin.x + size.width && mouse.y >= origin.y && mouse.y <= origin.y + size.height) {
+      screen = candidate;
+      break;
+    }
+  }
+  var visible = screen.visibleFrame;
+  var height = panel.frame.size.height;
+  var x = visible.origin.x + visible.size.width - PANEL_W - 12;
+  var y = visible.origin.y + Math.max(12, (visible.size.height - height) / 2);
+  panel.setFrameOrigin($.NSMakePoint(x, y));
+}
+
+function rebuild() {
+  var views = body.subviews;
+  var old = [];
+  for (var i = 0; i < views.count; i++) old.push(views.objectAtIndex(i));
+  old.forEach(function (view) { view.removeFromSuperview; });
+
+  var shown = load();
+  shownIds = shown.map(function (model) { return model.id; });
+  if (shown.length === 0) {
+    panel.setContentSize($.NSMakeSize(PANEL_W, 36));
+    return;
+  }
+  var mode = displayMode();
+  var mine = readLine(minePath);
+  var cheapest = turnCost(shown[shown.length - 1]);
+  var top = turnCost(shown[0]);
+  var font = $.NSFont.fontWithNameSize("Menlo", 11);
+  if (!font) font = $.NSFont.monospacedSystemFontOfSizeWeight(11, $.NSFontWeightRegular);
+  var y = 8;
+  shown.forEach(function (model, index) {
+    var button = $.NSButton.alloc.initWithFrame($.NSMakeRect(8, y, PANEL_W - 16, 22));
+    var title = fit(model.name, 14) + " " + blocks(turnCost(model) / top) + " " + valueText(model, mode, cheapest);
+    button.setTitle(title);
+    button.setFont(font);
+    button.setBordered(false);
+    button.setAlignment($.NSTextAlignmentLeft);
+    button.setContentTintColor(model.id === mine || (mine === "" && index === 0)
+      ? $.NSColor.controlAccentColor
+      : $.NSColor.labelColor);
+    button.setTag(index);
+    button.setTarget(floatDelegate);
+    button.setAction("onPick:");
+    body.addSubview(button);
+    y += 24;
+  });
+  var height = y + 6;
+  panel.setContentSize($.NSMakeSize(PANEL_W, height));
+  body.setFrame($.NSMakeRect(0, 0, PANEL_W, height));
+}
+
+function tick() {
+  if (!shouldShow() || !readText(pricesPath)) {
+    if (panel.isVisible) panel.orderOut(null);
+    return;
+  }
+  var sig = [fileMtime(pricesPath), fileMtime(modelsPath), fileMtime(minePath), fileMtime(modePath), fileMtime(floatPath), readLine(minePath), displayMode()].join(":");
+  if (sig !== lastSig) {
+    rebuild();
+    lastSig = sig;
+    if (load().length === 0) {
+      panel.orderOut(null);
+      return;
+    }
+    place();
+  }
+  if (!panel.isVisible) {
+    place();
+    panel.orderFrontRegardless();
+  }
+}
+
+ObjC.registerSubclass({
+  name: "MCBFloatDelegate",
+  superclass: "NSObject",
+  methods: {
+    "tick:": { types: ["v", ["@"]], implementation: function () { tick(); } },
+    "onPick:": {
+      types: ["v", ["@"]],
+      implementation: function (sender) {
+        var id = shownIds[Number(sender.tag)];
+        if (!id) return;
+        var text = $.NSString.alloc.initWithString(id + "\n");
+        text.writeToFileAtomicallyEncodingError(minePath, true, $.NSUTF8StringEncoding, null);
+        runTask("/usr/bin/open", ["-g", "swiftbar://refreshplugin?name=model-cost.1h.sh"]);
+        floatDelegate.performSelectorWithObjectAfterDelay("tick:", null, 0.05);
+      }
+    }
+  }
+});
+
+ObjC.registerSubclass({
+  name: "MCBFloatBody",
+  superclass: "NSView",
+  methods: {
+    isFlipped: { types: ["B", []], implementation: function () { return true; } }
+  }
+});
+
+function run() {
+  var app = $.NSApplication.sharedApplication;
+  app.setActivationPolicy($.NSActivationPolicyAccessory);
+  floatDelegate = $.MCBFloatDelegate.alloc.init;
+
+  panel = $.NSPanel.alloc.initWithContentRectStyleMaskBackingDefer(
+    $.NSMakeRect(0, 0, PANEL_W, 80),
+    $.NSWindowStyleMaskBorderless | $.NSWindowStyleMaskNonactivatingPanel,
+    $.NSBackingStoreBuffered,
+    false
+  );
+  panel.setLevel($.NSStatusWindowLevel);
+  panel.setCollectionBehavior(
+    $.NSWindowCollectionBehaviorCanJoinAllSpaces |
+    $.NSWindowCollectionBehaviorFullScreenAuxiliary |
+    $.NSWindowCollectionBehaviorStationary |
+    $.NSWindowCollectionBehaviorIgnoresCycle
+  );
+  panel.setFloatingPanel(true);
+  panel.setHidesOnDeactivate(false);
+  panel.setBecomesKeyOnlyIfNeeded(true);
+  panel.setOpaque(false);
+  panel.setBackgroundColor($.NSColor.clearColor);
+  panel.setHasShadow(true);
+  panel.setAppearance($.NSAppearance.appearanceNamed($.NSAppearanceNameDarkAqua));
+
+  var effect = $.NSVisualEffectView.alloc.initWithFrame($.NSMakeRect(0, 0, PANEL_W, 80));
+  effect.setMaterial($.NSVisualEffectMaterialHUDWindow);
+  effect.setBlendingMode($.NSVisualEffectBlendingModeBehindWindow);
+  effect.setState($.NSVisualEffectStateActive);
+  effect.setWantsLayer(true);
+  effect.layer.setCornerRadius(12);
+  effect.layer.setMasksToBounds(true);
+  panel.setContentView(effect);
+
+  body = $.MCBFloatBody.alloc.initWithFrame($.NSMakeRect(0, 0, PANEL_W, 80));
+  body.setAutoresizingMask($.NSViewWidthSizable | $.NSViewHeightSizable);
+  effect.addSubview(body);
+
+  $.NSTimer.scheduledTimerWithTimeIntervalTargetSelectorUserInfoRepeats(0.7, floatDelegate, "tick:", null, true);
+  app.run();
+}
+EOF
 esac
 
 sync_failed=0
+start_float
 if [ ! -s "$PRICES_FILE" ] || [ -z "$(find "$PRICES_FILE" -mmin -"$SYNC_EVERY_MIN" 2>/dev/null)" ]; then
   sync_prices || sync_failed=1
 fi
@@ -384,10 +730,15 @@ fi
 
 mode=$(cat "$MODE_FILE" 2>/dev/null || true)
 mine=$(cat "$MINE_FILE" 2>/dev/null || true)
+float_mode=$(cat "$FLOAT_MODE_FILE" 2>/dev/null || true)
+case "$float_mode" in
+  always | off) ;;
+  *) float_mode=apps ;;
+esac
 
 awk -F'\t' \
   -v self="$0" -v mode="${mode:-turn}" -v mine="$mine" -v max="$MAX_SHOWN" \
-  -v tin="$TURN_IN" -v tout="$TURN_OUT" \
+  -v tin="$TURN_IN" -v tout="$TURN_OUT" -v float_mode="$float_mode" \
   -v synced="$synced" -v gray="$GRAY" '
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
 function num(v) { return v == int(v) ? sprintf("%d", v) : sprintf("%.2f", v) }
@@ -459,6 +810,10 @@ END {
   print "--Times the cheapest | " action("param1=mode param2=x") (mode == "x" ? " checked=true" : "")
   print "--$ per 1M tokens | " action("param1=mode param2=perm") (mode == "perm" ? " checked=true" : "")
   print "Edit models… | sfimage=square.and.pencil " action("param1=edit")
+  print "Panel"
+  print "--Cursor, Claude, Codex | " action("param1=floatmode param2=apps") (float_mode == "apps" ? " checked=true" : "")
+  print "--Always | " action("param1=floatmode param2=always") (float_mode == "always" ? " checked=true" : "")
+  print "--Off | " action("param1=floatmode param2=off") (float_mode == "off" ? " checked=true" : "")
   print "---"
   print "Sync prices now | " action("param1=sync")
   print synced " | size=11 color=" gray
